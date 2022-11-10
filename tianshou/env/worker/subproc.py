@@ -8,11 +8,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import gym
 import numpy as np
 
-from tianshou.env.utils import (
-    CloudpickleWrapper,
-    gym_new_venv_step_type,
-    gym_old_venv_step_type,
-)
+from tianshou.env.utils import CloudpickleWrapper
 from tianshou.env.worker import EnvWorker
 
 _NP_TO_CT = {
@@ -41,13 +37,12 @@ class ShArray:
     def save(self, ndarray: np.ndarray) -> None:
         assert isinstance(ndarray, np.ndarray)
         dst = self.arr.get_obj()
-        dst_np = np.frombuffer(dst,
-                               dtype=self.dtype).reshape(self.shape)  # type: ignore
+        dst_np = np.frombuffer(dst, dtype=self.dtype).reshape(self.shape)
         np.copyto(dst_np, ndarray)
 
     def get(self) -> np.ndarray:
         obj = self.arr.get_obj()
-        return np.frombuffer(obj, dtype=self.dtype).reshape(self.shape)  # type: ignore
+        return np.frombuffer(obj, dtype=self.dtype).reshape(self.shape)
 
 
 def _setup_buf(space: gym.Space) -> Union[dict, tuple, ShArray]:
@@ -91,11 +86,11 @@ def _worker(
                 p.close()
                 break
             if cmd == "step":
-                env_return = env.step(data)
+                obs, reward, done, info = env.step(data)
                 if obs_bufs is not None:
-                    _encode_obs(env_return[0], obs_bufs)
-                    env_return = (None, *env_return[1:])
-                p.send(env_return)
+                    _encode_obs(obs, obs_bufs)
+                    obs = None
+                p.send((obs, reward, done, info))
             elif cmd == "reset":
                 retval = env.reset(**data)
                 reset_returns_info = isinstance(
@@ -127,7 +122,7 @@ def _worker(
             elif cmd == "getattr":
                 p.send(getattr(env, data) if hasattr(env, data) else None)
             elif cmd == "setattr":
-                setattr(env.unwrapped, data["key"], data["value"])
+                setattr(env, data["key"], data["value"])
             else:
                 p.close()
                 raise NotImplementedError
@@ -214,8 +209,8 @@ class SubprocEnvWorker(EnvWorker):
 
     def recv(
         self
-    ) -> Union[gym_old_venv_step_type, gym_new_venv_step_type, Tuple[np.ndarray, dict],
-               np.ndarray]:  # noqa:E125
+    ) -> Union[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Tuple[
+        np.ndarray, dict], np.ndarray]:  # noqa:E125
         result = self.parent_remote.recv()
         if isinstance(result, tuple):
             if len(result) == 2:
@@ -223,10 +218,10 @@ class SubprocEnvWorker(EnvWorker):
                 if self.share_memory:
                     obs = self._decode_obs()
                 return obs, info
-            obs = result[0]
+            obs, rew, done, info = result
             if self.share_memory:
                 obs = self._decode_obs()
-            return (obs, *result[1:])  # type: ignore
+            return obs, rew, done, info
         else:
             obs = result
             if self.share_memory:

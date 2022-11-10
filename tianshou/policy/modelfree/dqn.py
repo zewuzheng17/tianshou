@@ -44,6 +44,7 @@ class DQNPolicy(BasePolicy):
         optim: torch.optim.Optimizer,
         discount_factor: float = 0.99,
         estimation_step: int = 1,
+        gradnorm:bool = False,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
         is_double: bool = True,
@@ -67,7 +68,11 @@ class DQNPolicy(BasePolicy):
         self._rew_norm = reward_normalization
         self._is_double = is_double
         self._clip_loss_grad = clip_loss_grad
-
+        self._gradnorm = gradnorm
+        if self._gradnorm:
+            # weights for grad norm
+            self.multitask_weights = torch.tensor([1.0, 1.0], requires_grad=True, device='cuda')
+            self._init_gradnorm = True
     def set_eps(self, eps: float) -> None:
         """Set the eps for epsilon-greedy exploration."""
         self.eps = eps
@@ -157,12 +162,13 @@ class DQNPolicy(BasePolicy):
         model = getattr(self, model)
         obs = batch[input]
         obs_next = obs.obs if hasattr(obs, "obs") else obs
-        logits, hidden = model(obs_next, state=state, info=batch.info)
+        logits, hidden, representation, multi_head_output_q, multi_head_output_v = model(obs_next, state=state, info=batch.info)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[1]
         act = to_numpy(q.max(dim=1)[1])
-        return Batch(logits=logits, act=act, state=hidden)
+        # act get the index with shape (batch_size*num_atoms(each element of atoms is the action index that has maximun value))
+        return Batch(logits=logits, act=act, state=hidden, m_h_output_q=multi_head_output_q, m_h_output_v = multi_head_output_v)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
         if self._target and self._iter % self._freq == 0:
@@ -201,3 +207,49 @@ class DQNPolicy(BasePolicy):
             rand_act = q.argmax(axis=1)
             act[rand_mask] = rand_act[rand_mask]
         return act
+
+    def gradnorm(self, origin_loss, multihead_loss):
+        if self._init_gradnorm:
+            self.gradnorm_init_loss = torch.stack([origin_loss, multihead_loss]).detach()
+            print("initial loss:",self.gradnorm_init_loss)
+            self._init_gradnorm = False
+
+        # compute the loss in a weighted maner
+        task_losses = torch.stack([origin_loss, multihead_loss])
+        weighted_losses = self.multitask_weights * task_losses
+        total_weighted_loss = weighted_losses.sum()
+
+        # compute and retain gradients of all weights
+        total_weighted_loss.backward(retain_graph=True)
+
+        # zero the w_i(t) gradients since we want to update the weights using gradnorm loss
+        self.multitask_weights.grad = 0.0 * self.multitask_weights.grad
+
+        # specific pattern for search of nn parameters
+        norms = []
+        gLgW = []
+        for w_i, L_i in zip(self.multitask_weights, task_losses):
+            for param in self.model.Q.parameters():
+                gLgW.append(torch.norm(torch.autograd.grad(L_i, param, retain_graph=True)[0]))
+            gLgW_mean = torch.mean(torch.stack(gLgW))
+            norms.append(torch.norm(w_i * gLgW_mean))
+        norms = torch.stack(norms)
+
+        # compute the constant term without accumulating gradients
+        # as it should stay constant during back-propagation
+        with torch.no_grad():
+            # loss ratios \curl{L}(t)
+            loss_ratios = task_losses / self.gradnorm_init_loss
+            # inverse training rate r(t)
+            inverse_train_rates = loss_ratios / loss_ratios.mean() #this two values sums to 1
+            # print(inverse_train_rates)
+            constant_term = norms.mean() * (inverse_train_rates)
+        grad_norm_loss = (norms - constant_term).abs().sum()
+        self.multitask_weights.grad = torch.autograd.grad(grad_norm_loss, self.multitask_weights)[0]
+
+        self.multitask_weights.data -= 0.01*self.multitask_weights.grad.data
+        # normalize w_t
+        self.multitask_weights.data = torch.clip(self.multitask_weights, 0.000001, 1000)
+        self.multitask_weights.data = self.multitask_weights.data*2 / torch.sum(self.multitask_weights.data)
+        self.multitask_weights.grad.zero_()
+

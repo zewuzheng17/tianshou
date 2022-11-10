@@ -151,6 +151,7 @@ class DDPGPolicy(BasePolicy):
         current_q = critic(batch.obs, batch.act).flatten()
         target_q = batch.returns.flatten()
         td = current_q - target_q
+        # print("td:", td)
         # critic_loss = F.mse_loss(current_q1, target_q)
         critic_loss = (td.pow(2) * weight).mean()
         optimizer.zero_grad()

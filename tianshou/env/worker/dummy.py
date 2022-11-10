@@ -17,7 +17,7 @@ class DummyEnvWorker(EnvWorker):
         return getattr(self.env, key)
 
     def set_env_attr(self, key: str, value: Any) -> None:
-        setattr(self.env.unwrapped, key, value)
+        setattr(self.env, key, value)
 
     def reset(self, **kwargs: Any) -> Union[np.ndarray, Tuple[np.ndarray, dict]]:
         if "seed" in kwargs:
@@ -40,8 +40,8 @@ class DummyEnvWorker(EnvWorker):
     def seed(self, seed: Optional[int] = None) -> Optional[List[int]]:
         super().seed(seed)
         try:
-            return self.env.seed(seed)  # type: ignore
-        except (AttributeError, NotImplementedError):
+            return self.env.seed(seed)
+        except NotImplementedError:
             self.env.reset(seed=seed)
             return [seed]  # type: ignore
 

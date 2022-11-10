@@ -6,7 +6,7 @@ from torch import nn
 
 from tianshou.utils.net.common import MLP
 
-SIGMA_MIN = -20
+SIGMA_MIN = -5
 SIGMA_MAX = 2
 
 
@@ -104,6 +104,7 @@ class Critic(nn.Module):
         super().__init__()
         self.device = device
         self.preprocess = preprocess_net
+        # default the output of critic networks to 1
         self.output_dim = 1
         input_dim = getattr(preprocess_net, "output_dim", preprocess_net_output_dim)
         self.last = MLP(
@@ -124,13 +125,13 @@ class Critic(nn.Module):
         """Mapping: (s, a) -> logits -> Q(s, a)."""
         obs = torch.as_tensor(
             obs,
-            device=self.device,
+            device=self.device,  # type: ignore
             dtype=torch.float32,
         ).flatten(1)
         if act is not None:
             act = torch.as_tensor(
                 act,
-                device=self.device,
+                device=self.device,  # type: ignore
                 dtype=torch.float32,
             ).flatten(1)
             obs = torch.cat([obs, act], dim=1)
@@ -266,7 +267,7 @@ class RecurrentActorProb(nn.Module):
         """Almost the same as :class:`~tianshou.utils.net.common.Recurrent`."""
         obs = torch.as_tensor(
             obs,
-            device=self.device,
+            device=self.device,  # type: ignore
             dtype=torch.float32,
         )
         # obs [bsz, len, dim] (training) or [bsz, dim] (evaluation)
@@ -339,7 +340,7 @@ class RecurrentCritic(nn.Module):
         """Almost the same as :class:`~tianshou.utils.net.common.Recurrent`."""
         obs = torch.as_tensor(
             obs,
-            device=self.device,
+            device=self.device,  # type: ignore
             dtype=torch.float32,
         )
         # obs [bsz, len, dim] (training) or [bsz, dim] (evaluation)
@@ -352,7 +353,7 @@ class RecurrentCritic(nn.Module):
         if act is not None:
             act = torch.as_tensor(
                 act,
-                device=self.device,
+                device=self.device,  # type: ignore
                 dtype=torch.float32,
             )
             obs = torch.cat([obs, act], dim=1)

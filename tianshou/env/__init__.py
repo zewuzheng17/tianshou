@@ -1,11 +1,7 @@
 """Env package."""
 
-from tianshou.env.gym_wrappers import (
-    ContinuousToDiscrete,
-    MultiDiscreteToDiscrete,
-    TruncatedAsTerminated,
-)
-from tianshou.env.venv_wrappers import VectorEnvNormObs, VectorEnvWrapper
+from tianshou.env.gym_wrappers import ContinuousToDiscrete, MultiDiscreteToDiscrete
+from tianshou.env.venv_wrappers import VectorEnvNormObs, VectorEnvWrapper, VectorEnvVecObs
 from tianshou.env.venvs import (
     BaseVectorEnv,
     DummyVectorEnv,
@@ -27,8 +23,8 @@ __all__ = [
     "RayVectorEnv",
     "VectorEnvWrapper",
     "VectorEnvNormObs",
+    "VectorEnvVecObs",
     "PettingZooEnv",
     "ContinuousToDiscrete",
     "MultiDiscreteToDiscrete",
-    "TruncatedAsTerminated",
 ]

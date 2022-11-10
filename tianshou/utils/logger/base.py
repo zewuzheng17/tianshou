@@ -89,7 +89,6 @@ class BaseLogger(ABC):
             self.write("update/gradient_step", step, log_data)
             self.last_log_update_step = step
 
-    @abstractmethod
     def save_data(
         self,
         epoch: int,
@@ -107,7 +106,6 @@ class BaseLogger(ABC):
         """
         pass
 
-    @abstractmethod
     def restore_data(self) -> Tuple[int, int, int]:
         """Return the metadata from existing log.
 
@@ -127,16 +125,4 @@ class LazyLogger(BaseLogger):
 
     def write(self, step_type: str, step: int, data: LOG_DATA_TYPE) -> None:
         """The LazyLogger writes nothing."""
-        pass
-
-    def save_data(
-        self,
-        epoch: int,
-        env_step: int,
-        gradient_step: int,
-        save_checkpoint_fn: Optional[Callable[[int, int, int], str]] = None,
-    ) -> None:
-        pass
-
-    def restore_data(self) -> Tuple[int, int, int]:
         pass

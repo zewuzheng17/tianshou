@@ -1,11 +1,6 @@
-from typing import Any, Tuple
+from typing import Any
 
 import cloudpickle
-import numpy as np
-
-gym_old_venv_step_type = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-gym_new_venv_step_type = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-                               np.ndarray]
 
 
 class CloudpickleWrapper(object):

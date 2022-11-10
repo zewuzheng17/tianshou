@@ -3,7 +3,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 from numba import njit
 
-from tianshou.data import Batch, HERReplayBuffer, PrioritizedReplayBuffer, ReplayBuffer
+from tianshou.data import Batch, PrioritizedReplayBuffer, ReplayBuffer
 from tianshou.data.batch import _alloc_by_keys_diff, _create_value
 
 
@@ -21,9 +21,7 @@ class ReplayBufferManager(ReplayBuffer):
         Please refer to :class:`~tianshou.data.ReplayBuffer` for other APIs' usage.
     """
 
-    def __init__(
-        self, buffer_list: Union[List[ReplayBuffer], List[HERReplayBuffer]]
-    ) -> None:
+    def __init__(self, buffer_list: List[ReplayBuffer]) -> None:
         self.buffer_num = len(buffer_list)
         self.buffers = np.array(buffer_list, dtype=object)
         offset, size = [], 0
@@ -120,9 +118,7 @@ class ReplayBufferManager(ReplayBuffer):
         for key in set(self._reserved_keys).intersection(batch.keys()):
             new_batch.__dict__[key] = batch[key]
         batch = new_batch
-        batch.__dict__["done"] = np.logical_or(batch.terminated, batch.truncated)
-        assert set(["obs", "act", "rew", "terminated", "truncated",
-                    "done"]).issubset(batch.keys())
+        assert set(["obs", "act", "rew", "done"]).issubset(batch.keys())
         if self._save_only_last_obs:
             batch.obs = batch.obs[:, -1]
         if not self._save_obs_next:
@@ -149,8 +145,6 @@ class ReplayBufferManager(ReplayBuffer):
         except ValueError:
             batch.rew = batch.rew.astype(float)
             batch.done = batch.done.astype(bool)
-            batch.terminated = batch.terminated.astype(bool)
-            batch.truncated = batch.truncated.astype(bool)
             if self._meta.is_empty():
                 self._meta = _create_value(  # type: ignore
                     batch, self.maxsize, stack=False)
@@ -212,48 +206,6 @@ class PrioritizedReplayBufferManager(PrioritizedReplayBuffer, ReplayBufferManage
         for buf in buffer_list:
             del buf.weight
         PrioritizedReplayBuffer.__init__(self, self.maxsize, **kwargs)
-
-
-class HERReplayBufferManager(ReplayBufferManager):
-    """HERReplayBufferManager contains a list of HERReplayBuffer with \
-    exactly the same configuration.
-
-    These replay buffers have contiguous memory layout, and the storage space each
-    buffer has is a shallow copy of the topmost memory.
-
-    :param buffer_list: a list of HERReplayBuffer needed to be handled.
-
-    .. seealso::
-
-        Please refer to :class:`~tianshou.data.ReplayBuffer` for other APIs' usage.
-    """
-
-    def __init__(self, buffer_list: List[HERReplayBuffer]) -> None:
-        super().__init__(buffer_list)
-
-    def _restore_cache(self) -> None:
-        for buf in self.buffers:
-            buf._restore_cache()
-
-    def save_hdf5(self, path: str, compression: Optional[str] = None) -> None:
-        self._restore_cache()
-        return super().save_hdf5(path, compression)
-
-    def set_batch(self, batch: Batch) -> None:
-        self._restore_cache()
-        return super().set_batch(batch)
-
-    def update(self, buffer: Union["HERReplayBuffer", "ReplayBuffer"]) -> np.ndarray:
-        self._restore_cache()
-        return super().update(buffer)
-
-    def add(
-        self,
-        batch: Batch,
-        buffer_ids: Optional[Union[np.ndarray, List[int]]] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        self._restore_cache()
-        return super().add(batch, buffer_ids)
 
 
 @njit

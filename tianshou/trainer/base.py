@@ -6,7 +6,7 @@ from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Union
 import numpy as np
 import tqdm
 
-from tianshou.data import AsyncCollector, Collector, ReplayBuffer
+from tianshou.data import Collector, ReplayBuffer
 from tianshou.policy import BasePolicy
 from tianshou.trainer.utils import gather_info, test_episode
 from tianshou.utils import (
@@ -232,7 +232,6 @@ class BaseTrainer(ABC):
 
         if self.test_collector is not None:
             assert self.episode_per_test is not None
-            assert not isinstance(self.test_collector, AsyncCollector)  # Issue 700
             self.test_collector.reset_stat()
             test_result = test_episode(
                 self.policy, self.test_collector, self.test_fn, self.start_epoch,
@@ -284,6 +283,7 @@ class BaseTrainer(ABC):
             while t.n < t.total and not self.stop_fn_flag:
                 data: Dict[str, Any] = dict()
                 result: Dict[str, Any] = dict()
+                # collect data
                 if self.train_collector is not None:
                     data, result, self.stop_fn_flag = self.train_step()
                     t.update(result["n/st"])
@@ -296,6 +296,7 @@ class BaseTrainer(ABC):
                     result["n/st"] = int(self.gradient_step)
                     t.update()
 
+                # update policy network
                 self.policy_update_fn(data, result)
                 t.set_postfix(**data)
 
@@ -308,13 +309,17 @@ class BaseTrainer(ABC):
 
         if not self.stop_fn_flag:
             self.logger.save_data(
-                self.epoch, self.env_step, self.gradient_step, self.save_checkpoint_fn
-            )
+                self.epoch, self.env_step, self.gradient_step, None
+            ) #self.save_checkpoint_fn
+
             # test
             if self.test_collector is not None:
                 test_stat, self.stop_fn_flag = self.test_step()
                 if not self.is_run:
                     epoch_stat.update(test_stat)
+
+                # save checkpoint policy
+                self.save_checkpoint_fn(self.policy, self.epoch, self.train_collector.buffer,self.step_per_epoch, self.logger)
 
         if not self.is_run:
             epoch_stat.update({k: v.get() for k, v in self.stat.items()})
@@ -345,6 +350,7 @@ class BaseTrainer(ABC):
             self.policy, self.test_collector, self.test_fn, self.epoch,
             self.episode_per_test, self.logger, self.env_step, self.reward_metric
         )
+        # return the reward of test
         rew, rew_std = test_result["rew"], test_result["rew_std"]
         if self.best_epoch < 0 or self.best_reward < rew:
             self.best_epoch = self.epoch
@@ -373,6 +379,7 @@ class BaseTrainer(ABC):
 
         return test_stat, stop_fn_flag
 
+    # This function records training data
     def train_step(self) -> Tuple[Dict[str, Any], Dict[str, Any], bool]:
         """Perform one training step."""
         assert self.episode_per_test is not None

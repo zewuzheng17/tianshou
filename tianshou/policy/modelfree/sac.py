@@ -9,7 +9,6 @@ from tianshou.data import Batch, ReplayBuffer
 from tianshou.exploration import BaseNoise
 from tianshou.policy import DDPGPolicy
 
-
 class SACPolicy(DDPGPolicy):
     """Implementation of Soft Actor-Critic. arXiv:1812.05905.
 
@@ -64,6 +63,10 @@ class SACPolicy(DDPGPolicy):
         alpha: Union[float, Tuple[float, torch.Tensor, torch.optim.Optimizer]] = 0.2,
         reward_normalization: bool = False,
         estimation_step: int = 1,
+        reset: bool = False,
+        reset_interval: int = 400000,
+        test_capacity: bool = False,
+        test_capacity_interval: int = 100000,
         exploration_noise: Optional[BaseNoise] = None,
         deterministic_eval: bool = True,
         **kwargs: Any,
@@ -92,6 +95,21 @@ class SACPolicy(DDPGPolicy):
 
         self._deterministic_eval = deterministic_eval
         self.__eps = np.finfo(np.float32).eps.item()
+        self._reset = reset
+        self._reset_interval = reset_interval
+        self._test_capacity = test_capacity
+        self._test_capacity_interval = test_capacity_interval
+        if self._reset or self._test_capacity:
+            self.actor_init = deepcopy(self.actor)
+            self.critic1_init = deepcopy(self.critic1)
+            self.critic2_init = deepcopy(self.critic2)
+
+            if self._test_capacity:
+                self.critic1_capacity = deepcopy(self.critic1)
+                self.critic1_optim_capacity = torch.optim.Adam(self.critic1_capacity.parameters(), lr=1e-4)
+                self.critic1_capacity.train(True)
+
+        self._iter = 0
 
     def train(self, mode: bool = True) -> "SACPolicy":
         self.training = mode
@@ -115,14 +133,17 @@ class SACPolicy(DDPGPolicy):
         logits, hidden = self.actor(obs, state=state, info=batch.info)
         assert isinstance(logits, tuple)
         dist = Independent(Normal(*logits), 1)
+        # whether to use deterministic action or not
         if self._deterministic_eval and not self.training:
             act = logits[0]
         else:
+        # for training, we sample an action from the distributions， rsample use the reparameterize trick
             act = dist.rsample()
         log_prob = dist.log_prob(act).unsqueeze(-1)
         # apply correction for Tanh squashing when computing logprob from Gaussian
         # You can check out the original SAC paper (arXiv 1801.01290): Eq 21.
         # in appendix C to get some understanding of this equation.
+        # the below actions are first constrained to range(-1,1), and then log_prob is computed on this action.
         squashed_action = torch.tanh(act)
         log_prob = log_prob - torch.log((1 - squashed_action.pow(2)) +
                                         self.__eps).sum(-1, keepdim=True)
@@ -144,8 +165,29 @@ class SACPolicy(DDPGPolicy):
         ) - self._alpha * obs_next_result.log_prob
         return target_q
 
+
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
         # critic 1&2
+        if self._reset and self._iter % self._reset_interval == 0:
+            print('resetted policy!!!')
+            self.actor.load_state_dict(deepcopy(self.actor_init.state_dict()))
+            self.critic1.load_state_dict(deepcopy(self.critic1_init.state_dict()))
+            self.critic2.load_state_dict(deepcopy(self.critic2_init.state_dict()))
+            self.critic1_old = deepcopy(self.critic1)
+            self.critic2_old = deepcopy(self.critic2)
+            self.critic1_old.eval()
+            self.critic2_old.eval()
+
+        if self._test_capacity and self._iter % self._test_capacity_interval == 0:
+            print("test capacity resetted!!!")
+            self.critic1_capacity.load_state_dict(deepcopy(self.critic1_init.state_dict()))
+            self.critic1_optim_capacity = torch.optim.Adam(self.critic1_capacity.parameters(), lr=1e-4)
+
+        if self._test_capacity:
+            td_c, critic1_loss_c = self._mse_optimizer(
+                batch, self.critic1_capacity, self.critic1_optim_capacity
+            )
+
         td1, critic1_loss = self._mse_optimizer(
             batch, self.critic1, self.critic1_optim
         )
@@ -182,9 +224,12 @@ class SACPolicy(DDPGPolicy):
             "loss/actor": actor_loss.item(),
             "loss/critic1": critic1_loss.item(),
             "loss/critic2": critic2_loss.item(),
+            "loss/critic1_test": critic1_loss_c.item(),
+            "loss/ratio": critic1_loss_c.item()/critic1_loss.item()
         }
         if self._is_auto_alpha:
             result["loss/alpha"] = alpha_loss.item()
             result["alpha"] = self._alpha.item()  # type: ignore
 
+        self._iter += 1
         return result

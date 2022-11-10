@@ -114,6 +114,7 @@ class OffpolicyTrainer(BaseTrainer):
             **kwargs,
         )
 
+    # this is the function that define how to update policy
     def policy_update_fn(self, data: Dict[str, Any], result: Dict[str, Any]) -> None:
         """Perform off-policy updates."""
         assert self.train_collector is not None

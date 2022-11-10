@@ -71,6 +71,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         losses are weighted less).
         """
         # important sampling weight calculation
+        # alpha if for adjusting the weight, beta is for adjusting the importance sampling weight
         # original formula: ((p_j/p_sum*N)**(-beta))/((p_min/p_sum*N)**(-beta))
         # simplified formula: (p_j/p_min)**(-beta)
         return (self.weight[index] / self._min_prio)**(-self._beta)
